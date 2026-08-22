@@ -77,7 +77,7 @@ while game is True:
                 winCounter = 1 # set to 0
                 nums_tracker.append(nums) # put diff number into last tried list
 
-    for y in range(1,8):
+    for y in range(0,7): # internal, so use 0-6
         if board[y][column_num] == nums_tracker[-1] and nums > 0:
             winCounter+=1
             if winCounter == 4:
