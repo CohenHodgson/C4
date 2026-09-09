@@ -152,7 +152,7 @@ n_observations = 42 # places to check
 policy_net = NeuralNetwork(n_observations, n_actions).to(device) # network training
 target_net = NeuralNetwork(n_observations, n_actions).to(device) # delayed copy for Q
 
-target_net.load_state_dict(policy_net.state_dict()) # copies policy net to target after both hae been sent to device?
+target_net.load_state_dict(policy_net.state_dict()) # copies policy net to target after both have been sent to device?
 
 optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
 memory = ReplayMemory(10000)
