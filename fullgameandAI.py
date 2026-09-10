@@ -1,12 +1,10 @@
 import torch
 from torch import nn
 import torch.optim as optim
-from collections import namedtuple
-from collections import deque
+from collections import namedtuple, deque
 import random
 import math
-import itertools
-
+import time
 
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu" # will be gpu on pc
 print(f"Using {device} device")
@@ -22,18 +20,17 @@ class NeuralNetwork(nn.Module):
         logits = self.linear_relu_stack(x)
         return logits # Q values
 
-    def __init__(self):
+    def __init__(self): 
         super().__init__() # run intialization from parent (super -> nn.module in this case)
         self.flatten = nn.Flatten() # turn the 2d into 1d, 6x7=42.
         self.linear_relu_stack = nn.Sequential( # puts layers into order, input -> A -> B -> output
-            nn.Linear(42, 128), # stack of linear and ReLU neural layers
+            nn.Linear(42, 128), # stack of linear and ReLU neural layers 
             nn.ReLU(), # activation func, prunes (replaces with 0) negative nums.
             nn.Linear(128, 48), # nn.Linear is fully connected layer, 42 inputs -> linear layer -> 7 moves/outputs
             nn.ReLU(),
-            nn.Linear(48, 7),
+            nn.Linear(48,7),
         )
-
-
+        
 model = NeuralNetwork().to(device)
 print(model)
 
@@ -55,33 +52,29 @@ reward = what happens because of move
 '''
 
 class ReplayMemory(object): # uhh, the memory.
-    def __init__(self, capacity):
-        '''
-        aside from acting on behalf of the replayer memory,
-        replay memory is reffered to as an object,
+    def __init__(self, capacity): 
+        ''' 
+        aside from acting on behalf of the replayer memory, 
+        replay memory is reffered to as an object, 
         call replaymemory with number and it'll reference the number to func
         '''
         self.memory = deque([], maxlen=capacity) # deque has special commands letting it remove and add things easier from right and left sides.
         '''
-        deque[] makes it start with empty. maxlen=capacity means,
+        deque[] makes it start with empty. maxlen=capacity means, 
         do not let memory grow beyond set capacity, e.g., 10,000 games.
         '''
-
     def push(self, *args):
         self.memory.append(transition(*args))
         '''
-        pass its arguements and use self to access memory.
+        pass its arguements and use self to access memory. 
         '''
-
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
         '''
         random(pop, k) k is batch size
         '''
-
     def __len__(self): # gives length of object
         return len(self.memory)
-
 
 
 board = [
@@ -108,7 +101,6 @@ output = model(float_tensor_board)
 
 print(output)
 print(output.shape)
-
 weight = torch.randn(42, 7, requires_grad=True) # for each possible choice we need 7 weights, each neuron will weigh each place?
 bias = torch.randn(7) # 7 output neurons
 
@@ -119,7 +111,7 @@ loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
 '''
-Q is defined as Q(s,a), where s is state, and a is action,
+Q is defined as Q(s,a), where s is state, and a is action, 
 so board state and column_num
 
 arg max Q(s,a) means, give me the action with highest q value
@@ -130,8 +122,8 @@ r is reward from said action
 gamma is how much future rewards matter.
 s' is the state after move
 pi(s') is the plan of action after move.
-all together, it reads the q value, as defined by policy, is equal to the
-reward plus how much future rewards matter times
+all together, it reads the q value, as defined by policy, is equal to the 
+reward plus how much future rewards matter times 
 Q policy which is dependant on the future moves/weightings (s,a vs s',a')
 '''
 
@@ -160,146 +152,37 @@ target_net = NeuralNetwork().to(device) # delayed copy for Q
 
 target_net.load_state_dict(policy_net.state_dict()) # copies policy net to target after both have been sent to device?fff
 
-optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
+
+criterion = nn.SmoothL1Loss()
+
 memory = ReplayMemory(10000)
 
 steps_done = 0
 
 
-class Connect4Env:
-
-    def reset(self):
-        self.board = [
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0]
-        ]
-        return self.board
-
-    def step(self, action):
-
-        column = action
-
-        if column < 0 or column >= 7:
-            return self.board, -1, True, False, {}
-
-        row = None
-
-        for y in range(5, -1, -1):
-            if self.board[y][column] == 0:
-                row = y
-                break
-
-        if row is None:
-            return self.board, -1, False, False, {}
-
-        self.board[row][column] = 1
-
-        if self.check_win(1):
-            return self.board, 1, True, False, {}
-
-        if all(self.board[0][x] != 0 for x in range(7)):
-            return self.board, 0, True, False, {}
-
-        opponent_columns = [
-            x for x in range(7)
-            if self.board[0][x] == 0
-        ]
-
-        if opponent_columns:
-            opponent_column = random.choice(opponent_columns)
-
-            for y in range(5, -1, -1):
-                if self.board[y][opponent_column] == 0:
-                    self.board[y][opponent_column] = 2
-                    break
-
-            if self.check_win(2):
-                return self.board, -1, True, False, {}
-
-        if all(self.board[0][x] != 0 for x in range(7)):
-            return self.board, 0, True, False, {}
-
-        return self.board, 0, False, False, {}
-
-    def check_win(self, player):
-
-        for y in range(6):
-            for x in range(4):
-                if all(self.board[y][x + i] == player for i in range(4)):
-                    return True
-
-        for y in range(3):
-            for x in range(7):
-                if all(self.board[y + i][x] == player for i in range(4)):
-                    return True
-
-        for y in range(3):
-            for x in range(4):
-                if all(self.board[y + i][x + i] == player for i in range(4)):
-                    return True
-
-        for y in range(3, 6):
-            for x in range(4):
-                if all(self.board[y - i][x + i] == player for i in range(4)):
-                    return True
-
-        return False
-
-    @property
-    def action_space(self):
-        return self
-
-    def sample(self):
-        valid_actions = [
-            x for x in range(7)
-            if self.board[0][x] == 0
-        ]
-
-        return random.choice(valid_actions)
-
-
-env = Connect4Env()
-
-
-def select_action(state):
+def select_action (state): 
     global steps_done
-
     sample = random.random() # random decision for exploration NOT exploit
-
-    eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(
-        -1. * steps_done / EPS_DECAY
-    )
-
+    eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. *steps_done / EPS_DECAY)
     '''
     epsilon is the probability of choosing random action. decreases with each gen.
     math: ϵ=ϵend​+(ϵstart​−ϵend​)e−steps/decay -> 
     code: EPS_END + (EPS_START - EPS_END) * math.exp(-1. *steps_done / EPS_DECAY)
     ^ I'm not sure if that's right though
     '''
-
     steps_done += 1
-
     if sample > eps_threshold: # live update explore and exploit, so it exploits more as it gets better.
         with torch.no_grad(): # disables gradient calc, also a decorator
-            return policy_net(state).max(1).indices.view(1, 1) # max q value, find index of that, shape result into tensor
+            return policy_net(state).max(1).indices.view(1,1) # max q value, find index of that, shape result into tensor 
     else:
-        return torch.tensor(
-            [[env.action_space.sample()]],
-            device=device,
-            dtype=torch.long
-        )
-
+        return torch.tensor([[random.randrange(n_actions)]], device = device, dtype=torch.long)
     '''
     if epsilon is bigger, than return a random choice from n_actions = 7, with device, as a tensor
-    '''
+    ''' 
 
 
 def optimize_model():
-
     if len(memory) < BATCH_SIZE:
         return
 
@@ -308,12 +191,7 @@ def optimize_model():
     batch = transition(*zip(*transitions))
 
     non_final_mask = torch.tensor(
-        tuple(
-            map(
-                lambda s: s is not None,
-                batch.next_state
-            )
-        ),
+        tuple(map(lambda s: s is not None, batch.next_state)),
         device=device,
         dtype=torch.bool
     )
@@ -330,117 +208,90 @@ def optimize_model():
 
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
 
-    with torch.no_grad():
+    with torch.no_grad(): # no grad because we don't want it to influence net
         next_state_values[non_final_mask] = target_net(
             non_final_next_states
         ).max(1).values
 
-    expected_action_values = (next_state_values * GAMMA) + reward_batch
+    expected_action_values = (next_state_values * GAMMA) + reward_batch # q values
 
-    criterion = nn.SmoothL1Loss()
+    # huber loss
+
     loss = criterion(
         state_action_values,
         expected_action_values.unsqueeze(1)
     )
 
     optimizer.zero_grad()
-
-    loss.backward()
-
-    torch.nn.utils.clip_grad_value_(
-        policy_net.parameters(),
-        100
-    )
-
+    loss.backward() # taking backpropagation
+    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
     optimizer.step()
-
-
-if torch.cuda.is_available() or torch.backends.mps.is_available():
-    num_episodes = 600
-else:
-    num_episodes = 50
-
-
-for i_episode in range(num_episodes):
-
-    observation = env.reset()
-
-    state = torch.tensor(
-        observation,
-        dtype=torch.float32,
-        device=device
-    ).unsqueeze(0)
-
-    for t in itertools.count():
-
-        action = select_action(state)
-
-        observation, reward, terminated, truncated, _ = env.step(
-            action.item()
-        )
-
-        reward = torch.tensor(
-            [reward],
-            device=device,
-            dtype=torch.float32
-        )
-
-        if terminated or truncated:
-            next_state = None
-        else:
-            next_state = torch.tensor(
-                observation,
-                dtype=torch.float32,
-                device=device
-            ).unsqueeze(0)
-
-        memory.push(
-            state,
-            action,
-            next_state,
-            reward
-        )
-
-        state = next_state
-
-        if terminated or truncated:
-            break
-
-        optimize_model()
-
-    target_net_state_dict = target_net.state_dict()
-    policy_net_state_dict = policy_net.state_dict()
-
-    for key in policy_net_state_dict:
-        target_net_state_dict[key] = (
-            TAU * policy_net_state_dict[key]
-            + (1 - TAU) * target_net_state_dict[key]
-        )
-
-    target_net.load_state_dict(target_net_state_dict)
-
 
 
 # game code below, switch players to X and Os
 
-game = True
+def check_win(board):
+    # horizontal wins
+    for y in range(6):
+        for x in range(4):
+            if board[y][x] != 0:
+                if (board[y][x] == board[y][x+1] and
+                    board[y][x] == board[y][x+2] and
+                    board[y][x] == board[y][x+3]):
+                    return board[y][x]
 
-print("Are you player 1 or 2?.")
+    # vertical wins
+    for y in range(3):
+        for x in range(7):
+            if board[y][x] != 0:
+                if (board[y][x] == board[y+1][x] and
+                    board[y][x] == board[y+2][x] and
+                    board[y][x] == board[y+3][x]):
+                    return board[y][x]
 
-try:
-    answer = str(input())
-except ValueError:
-    print("Please enter either '1' or '2'")
-        
+    # diagonal, top left to bottom right
+    for y in range(3):
+        for x in range(4):
+            if board[y][x] != 0:
+                if (board[y][x] == board[y+1][x+1] and
+                    board[y][x] == board[y+2][x+2] and
+                    board[y][x] == board[y+3][x+3]):
+                    return board[y][x]
 
-if answer == "1":
-    player = 1
-    opp = 2
-    round = 1
-elif answer == "2":
-    player = 2
-    opp = 1
-    round = 0
+    # diagonal, top right to bottom left
+    for y in range(3):
+        for x in range(3, 7):
+            if board[y][x] != 0:
+                if (board[y][x] == board[y+1][x-1] and
+                    board[y][x] == board[y+2][x-2] and
+                    board[y][x] == board[y+3][x-3]):
+                    return board[y][x]
+    return 0
+
+
+def get_legal_actions(board):
+    return [
+        column
+        for column in range(7)
+        if board[0][column] == 0
+    ]
+
+
+def make_move(board, column, player):
+    for row in range(5, -1, -1):
+        if board[row][column] == 0:
+            board[row][column] = player
+            return row
+
+    return None
+
+
+def get_state(board):
+    return torch.tensor(
+        board,
+        dtype=torch.float32,
+        device=device
+    ).unsqueeze(0)
 
 
 def show_board():
@@ -448,27 +299,220 @@ def show_board():
         print(row)
 
 
-while game is True:
+
+def train_ai(num_games):
+    global board
+
+    print(f"Training AI for {num_games} games...")
+
+    ai_wins = 0
+    opp_wins = 0
+    draws = 0
+
+    for episode in range(num_games):
+
+        board = [
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0]]
+
+        player = 1
+        game_over = False
+
+        while not game_over:
+
+            legal_actions = get_legal_actions(board)
+
+            if not legal_actions:
+                break
+
+            # ai is player 2
+            if player == 2:
+
+                state = get_state(board)
+
+                # Choose using epsilon-greedy
+                action = select_action(state)
+                column = action.item()
+
+                # If AI chose a full column, choose a legal one
+                if column not in legal_actions:
+                    column = random.choice(legal_actions)
+                    action = torch.tensor(
+                        [[column]],
+                        device=device,
+                        dtype=torch.long
+                    )
+
+                make_move(board, column, 2)
+
+                winner = check_win(board)
+
+                if winner == 2: # give reward depndant on how AI is doing
+                    reward = torch.tensor([1.0], device=device) # reward player 2 (AI) for 1.0
+                    next_state = None
+                    game_over = True
+
+                elif winner == 1:
+                    reward = torch.tensor([-1.0], device=device) # same for player 1 (AI)
+                    next_state = None
+                    game_over = True
+
+                elif not get_legal_actions(board): # if no winner, get legal actions for board
+                    reward = torch.tensor([0.0], device=device)
+                    next_state = None
+                    game_over = True
+
+                else: # 
+                    reward = torch.tensor([0.0], device=device)
+                    next_state = get_state(board)
+
+                memory.push( # push transition state to memory
+                    state,
+                    action,
+                    next_state,
+                    reward
+                )
+
+                optimize_model()
+
+            # random opponent
+            else:
+                column = random.choice(legal_actions)
+                make_move(board, column, 1)
+
+                winner = check_win(board)
+
+                if winner == 1:
+                    # Give the AI's previous move a loss
+                    if len(memory) > 0:
+                        last = memory.memory[-1]
+
+                        memory.memory[-1] = transition(
+                            last.state,
+                            last.action,
+                            None,
+                            torch.tensor([-1.0], device=device)
+                        )
+
+                        optimize_model()
+
+                    game_over = True
+
+                elif not get_legal_actions(board):
+                    game_over = True
+
+            player = 2 if player == 1 else 1
+
+        # Slowly copy policy network into target network
+        target_net_state_dict = target_net.state_dict()
+        policy_net_state_dict = policy_net.state_dict()
+
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = (
+                policy_net_state_dict[key] * TAU
+                + target_net_state_dict[key] * (1 - TAU)
+            )
+
+        target_net.load_state_dict(target_net_state_dict)
+
+        if winner == 2:
+            ai_wins += 1
+        elif winner == 1:
+            opp_wins += 1
+        else:
+            draws +=1
+
+
+
+
+start = time.time() # amount of seconds from 1970
+# train before playing
+train_ai(100000)
+
+end = time.time()
+
+print(end - start) # gives seconds it took to compute
+
+board = [
+[0, 0, 0, 0, 0, 0, 0],
+[0, 0, 0, 0, 0, 0, 0],
+[0, 0, 0, 0, 0, 0, 0],
+[0, 0, 0, 0, 0, 0, 0],
+[0, 0, 0, 0, 0, 0, 0],
+[0, 0, 0, 0, 0, 0, 0] ] # clear board after training
+
+print("Do you want to fight another player, or an AI?")
+
+enemy = input()
+
+if enemy == "Player":
+
+    print("Are you player 1 or 2?")
+    answer = input()
+
+    if answer == "1":
+        player = 1
+    elif answer == "2":
+        player = 2
+    else:
+        print("Invalid player.")
+        game = False
+
+elif enemy == "AI":
+
+    ai = 2
+    player = 1
+
+else:
+    print("Please enter either 'AI' or 'Player'")
+    game = False
+
+
+game = True
+
+while game:
 
     print(f"Select a column. Player {player}:")
     show_board()
 
-    try:
-        column_num = int(input()) - 1
-    except ValueError:
-        print("Please enter a valid column number, 1-7")
-        continue
+    if enemy == "AI" and player == ai:
 
-    if column_num in range(0,7):
-        round += 1
+        state = get_state(board)
 
-    if column_num not in range(0, 7):
+        legal_actions = get_legal_actions(board)
+
+        with torch.no_grad():
+            q_values = policy_net(state)[0]
+
+            # Prevent full columns from being selected
+            for column in range(7):
+                if column not in legal_actions:
+                    q_values[column] = float("-inf")
+
+            column_num = q_values.argmax().item()
+
+        print(f"AI chooses column {column_num + 1}")
+
+    else:
+
+        try:
+            column_num = int(input()) - 1
+
+        except ValueError:
+            print("Please enter a valid column number, 1-7")
+            continue
+
+    if column_num not in range(7):
         print("Please enter a valid column number, 1-7")
         continue
 
     choices = []
 
-    for row in range(0, 6):
+    for row in range(6):
         if board[row][column_num] == 0:
             choices.append(row)
 
@@ -478,99 +522,21 @@ while game is True:
 
     board[choices[-1]][column_num] = player
 
+    winner = check_win(board)
 
-    if round % 2 == 0:
+    if winner != 0:
+        show_board()
+        print(f"Player {winner} wins!")
+        game = False
+        continue
+
+    if not get_legal_actions(board):
+        show_board()
+        print("Draw!")
+        game = False
+        continue
+
+    if player == 1:
         player = 2
-        opp = 1
     else:
         player = 1
-        opp = 2
-
-
-    x_winCounter = 0
-    y_winCounter = 0
-
-    x_nums_tracker = [0]
-    y_nums_tracker = [0]
-
-    # horizontal wins
-    for row in board:
-        x_winCounter = 0
-        x_nums_tracker = [0]
-
-        for nums in row:
-            if nums == x_nums_tracker[-1] and nums != 0:
-                x_winCounter += 1
-
-                if x_winCounter == 4:
-                    print(f"Player {opp} wins!")
-                    game = False
-                    show_board()
-                    break
-            else:
-                x_winCounter = 1
-                x_nums_tracker.append(nums)
-
-
-
-    # vertical wins
-    for y in range(0, 6):
-        if board[y][column_num] == y_nums_tracker[-1] and board[y][column_num] != 0:
-            y_winCounter += 1
-
-            if y_winCounter == 4:
-                print(f"Player {opp} wins!")
-                game = False
-                show_board()
-                break
-        else:
-            y_winCounter = 1
-            y_nums_tracker.append(board[y][column_num])
-
-    # diagonal, bottom left to top right
-    for y in range(3, 6):
-        for x in range(0, 4):
-            if board[y][x] != 0:
-                if (board[y][x] == board[y-1][x+1] and
-                    board[y][x] == board[y-2][x+2] and
-                    board[y][x] == board[y-3][x+3]):
-
-                    print(f"Player {opp} wins!")
-                    game = False
-                    show_board()
-
-    # bottom right, top left
-    for y in range(3, 6):
-        for x in range(3, 7):
-            if board[y][x] != 0:
-                if (board[y][x] == board[y-1][x-1] and
-                    board[y][x] == board[y-2][x-2] and
-                    board[y][x] == board[y-3][x-3]):
-
-                    print(f"Player {opp} wins!")
-                    game = False
-                    show_board()
-
-    # top left, bottom right
-    for y in range(0, 3):
-        for x in range(0, 4):
-            if board[y][x] != 0:
-                if (board[y][x] == board[y+1][x+1] and
-                    board[y][x] == board[y+2][x+2] and
-                    board[y][x] == board[y+3][x+3]):
-
-                    print(f"Player {opp} wins!")
-                    game = False
-                    show_board()
-
-    # top right, bottom left
-    for y in range(0, 3):
-        for x in range(3, 7):
-            if board[y][x] != 0:
-                if (board[y][x] == board[y+1][x-1] and
-                    board[y][x] == board[y+2][x-2] and
-                    board[y][x] == board[y+3][x-3]):
-
-                    print(f"Player {opp} wins!")
-                    game = False
-                    show_board()
