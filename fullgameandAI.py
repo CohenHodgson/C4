@@ -9,9 +9,8 @@ import time
 device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu" # will be gpu on pc
 print(f"Using {device} device")
 
-learning_rate = 1e-3 # CHANGE ME
-batch_size = 32 # CHANGE ME
-epochs = 5 # CHANGE ME
+learning_rate = 1e-3 # CHANGE ME, how big of a step do you take
+batch_size = 64 # CHANGE ME, how many experinces for a weight update.
 
 
 class NeuralNetwork(nn.Module):
@@ -385,14 +384,14 @@ def train_ai(num_games):
 
 start = time.time() # amount of seconds from 1970
 # train before playing
-train_ai(1000)
+train_ai(1000) # CHANGE ME
 
 torch.save(policy_net.state_dict(), "connect4_model.pth") # save trained model
 print("Model saved. In connect4/path") 
 
 end = time.time()
 
-print(end - start) # gives seconds it took to compute
+print(end - start + " seconds") # gives seconds it took to compute
 
 board = [
 [0, 0, 0, 0, 0, 0, 0],
