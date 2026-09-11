@@ -317,7 +317,7 @@ def train_ai(num_games):
         player = 1
         game_over = False
 
-        while not game_over: # complicated self-play for training
+        while game_over == False: # complicated self-play for training
 
             legal_actions = get_legal_actions(board)
 
@@ -327,7 +327,7 @@ def train_ai(num_games):
             state = get_state(board)
 
             action = select_action(state)
-            column = action.item() # make ai act based on state of board, and make their action a column num.
+            column = action.item() # make ai act based on state of +board, and make their action a column num.
 
             make_move(board, column, player)
 
