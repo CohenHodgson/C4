@@ -269,16 +269,18 @@ def check_win(board):
     return 0
 
 
-def get_legal_actions(board):
-    return [
-        column
-        for column in range(7)
-        if board[0][column] == 0
-    ]
+def get_legal_actions(board): # return if column in range and is empty
+
+    legal_actions = []
+        
+    for column in range (7):
+        if board[0][column] == 0:
+            legal_actions.append(column)
+    return legal_actions    
 
 
 def make_move(board, column, player):
-    for row in range(5, -1, -1):
+    for row in range(5, -1, -1): # count all rows: start;stop;step
         if board[row][column] == 0:
             board[row][column] = player
             return row
@@ -287,7 +289,7 @@ def make_move(board, column, player):
 
 
 def get_state(board):
-    return torch.tensor(
+    return torch.tensor( # return tensor of board
         board,
         dtype=torch.float32,
         device=device
@@ -298,79 +300,62 @@ def show_board():
     for row in board:
         print(row)
 
-
-
 def train_ai(num_games):
     global board
-
-    print(f"Training AI for {num_games} games...")
-
-    ai_wins = 0
-    opp_wins = 0
-    draws = 0
 
     for episode in range(num_games):
 
         board = [
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0]]
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0]
+        ]
 
         player = 1
         game_over = False
 
-        while not game_over:
+        while not game_over: # complicated self-play for training
 
             legal_actions = get_legal_actions(board)
 
             if not legal_actions:
                 break
 
-            # ai is player 2
-            if player == 2:
+            state = get_state(board)
 
-                state = get_state(board)
+            action = select_action(state)
+            column = action.item() # make ai act based on state of board, and make their action a column num.
 
-                # Choose using epsilon-greedy
-                action = select_action(state)
-                column = action.item()
+            make_move(board, column, player)
 
-                # If AI chose a full column, choose a legal one
-                if column not in legal_actions:
-                    column = random.choice(legal_actions)
-                    action = torch.tensor(
-                        [[column]],
-                        device=device,
-                        dtype=torch.long
-                    )
+            winner = check_win(board)
 
-                make_move(board, column, 2)
+            if winner == player:
+                reward = torch.tensor([1.0], device=device)
+                memory.push(state, action, None, reward) # push transition
+                optimize_model() # optimize based on transition
+                game_over = True
 
-                winner = check_win(board)
+            elif winner != 0:
+                reward = torch.tensor([-1.0], device=device)
+                memory.push(state, action, None, reward)
+                optimize_model()
+                game_over = True
 
-                if winner == 2: # give reward depndant on how AI is doing
-                    reward = torch.tensor([1.0], device=device) # reward player 2 (AI) for 1.0
-                    next_state = None
-                    game_over = True
+            elif not get_legal_actions(board):
+                reward = torch.tensor([0.0], device=device)
+                memory.push(state, action, None, reward)
+                optimize_model()
+                game_over = True
 
-                elif winner == 1:
-                    reward = torch.tensor([-1.0], device=device) # same for player 1 (AI)
-                    next_state = None
-                    game_over = True
+            else:
+                next_state = get_state(board)
+                reward = torch.tensor([0.0], device=device)
 
-                elif not get_legal_actions(board): # if no winner, get legal actions for board
-                    reward = torch.tensor([0.0], device=device)
-                    next_state = None
-                    game_over = True
-
-                else: # 
-                    reward = torch.tensor([0.0], device=device)
-                    next_state = get_state(board)
-
-                memory.push( # push transition state to memory
+                memory.push(
                     state,
                     action,
                     next_state,
@@ -379,35 +364,9 @@ def train_ai(num_games):
 
                 optimize_model()
 
-            # random opponent
-            else:
-                column = random.choice(legal_actions)
-                make_move(board, column, 1)
-
-                winner = check_win(board)
-
-                if winner == 1:
-                    # Give the AI's previous move a loss
-                    if len(memory) > 0:
-                        last = memory.memory[-1]
-
-                        memory.memory[-1] = transition(
-                            last.state,
-                            last.action,
-                            None,
-                            torch.tensor([-1.0], device=device)
-                        )
-
-                        optimize_model()
-
-                    game_over = True
-
-                elif not get_legal_actions(board):
-                    game_over = True
-
             player = 2 if player == 1 else 1
 
-        # Slowly copy policy network into target network
+        # update net
         target_net_state_dict = target_net.state_dict()
         policy_net_state_dict = policy_net.state_dict()
 
@@ -419,19 +378,14 @@ def train_ai(num_games):
 
         target_net.load_state_dict(target_net_state_dict)
 
-        if winner == 2:
-            ai_wins += 1
-        elif winner == 1:
-            opp_wins += 1
-        else:
-            draws +=1
-
+        if (episode + 1) % 100 == 0:
+            print(f"Finished {episode + 1}/{num_games} games")
 
 
 
 start = time.time() # amount of seconds from 1970
 # train before playing
-train_ai(100000)
+train_ai(1000)
 
 end = time.time()
 
@@ -443,7 +397,7 @@ board = [
 [0, 0, 0, 0, 0, 0, 0],
 [0, 0, 0, 0, 0, 0, 0],
 [0, 0, 0, 0, 0, 0, 0],
-[0, 0, 0, 0, 0, 0, 0] ] # clear board after training
+[0, 0, 0, 0, 0, 0, 0] ] # clears board after training
 
 print("Do you want to fight another player, or an AI?")
 
