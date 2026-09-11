@@ -387,6 +387,9 @@ start = time.time() # amount of seconds from 1970
 # train before playing
 train_ai(1000)
 
+torch.save(policy_net.state_dict(), "connect4_model.pth") # save trained model
+print("Model saved. In connect4/path") 
+
 end = time.time()
 
 print(end - start) # gives seconds it took to compute
