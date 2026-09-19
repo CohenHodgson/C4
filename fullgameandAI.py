@@ -1,3 +1,4 @@
+import os # for file save
 import torch
 from torch import nn
 import torch.optim as optim
@@ -161,25 +162,48 @@ memory = ReplayMemory(10000)
 steps_done = 0
 
 
-def select_action (state): 
+def select_action(state, legal_actions): 
+
     global steps_done
+
     sample = random.random() # random decision for exploration NOT exploit
+
     eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. *steps_done / EPS_DECAY)
+
     '''
+
     epsilon is the probability of choosing random action. decreases with each gen.
+
     math: ϵ=ϵend​+(ϵstart​−ϵend​)e−steps/decay -> 
+
     code: EPS_END + (EPS_START - EPS_END) * math.exp(-1. *steps_done / EPS_DECAY)
+
     ^ I'm not sure if that's right though
+
     '''
+
     steps_done += 1
     if sample > eps_threshold: # live update explore and exploit, so it exploits more as it gets better.
+
         with torch.no_grad(): # disables gradient calc, also a decorator
-            return policy_net(state).max(1).indices.view(1,1) # max q value, find index of that, shape result into tensor 
+
+            q_values = policy_net(state)[0]
+
+            for column in range(n_actions):
+                if column not in legal_actions:
+                    q_values[column] = float("-inf") # tells argmax this column is not movable/full
+
+            return q_values.argmax().view(1,1) # max q value, find index of that, shape result into tensor 
+
     else:
-        return torch.tensor([[random.randrange(n_actions)]], device = device, dtype=torch.long)
+
+        return torch.tensor([[random.choice(legal_actions)]], device=device, dtype=torch.long)
+
     '''
+
     if epsilon is bigger, than return a random choice from n_actions = 7, with device, as a tensor
-    ''' 
+
+    '''
 
 def optimize_model():
     if len(memory) < BATCH_SIZE:
@@ -210,13 +234,17 @@ def optimize_model():
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
 
     with torch.no_grad():
-        next_state_values[non_final_mask] = (
-            target_net(non_final_next_states).max(1).values
-        )
+        next_q_values = target_net(non_final_next_states)
 
-    # next_state is from the OPPONENT'S perspective,
-    # so their good position is bad for us.
-    expected_action_values = reward_batch - (GAMMA * next_state_values)
+        legal_mask = non_final_next_states[:, 0, :] == 0 # batch, row, column. : every board, 0 row 0, : every column. if any are illegal then its made 0 (False)
+
+        next_q_values[~legal_mask] = float("-inf") # ~ is a nishe operator that inverts boolean. -inf = neg infinity.
+
+        next_state_values[non_final_mask] = next_q_values.max(1).values # self-explanatory, max q value for each board in batch
+
+        # next_state is from the OPPONENT'S perspective,
+        # so their good position is bad for us.
+        expected_action_values = reward_batch - (GAMMA * next_state_values)
 
     loss = criterion(
         state_action_values,
@@ -235,6 +263,12 @@ def optimize_model():
 
 
 # game code below, switch players to X and Os
+
+'''
+optim direction in the future is just checking new `piece placed for wins.
+current one just looks at all pieces on board and looks in all directions for wins and then keeps looking if it 
+gets positive feedback. VERY inefficient.
+'''
 
 def check_win(board):
     # horizontal wins
@@ -342,7 +376,7 @@ def train_ai(num_games):
 
             state = get_state(board, player)
 
-            action = select_action(state)
+            action = select_action(state, legal_actions) # adding legal actions so ai can't make illegal moves
             column = action.item() # make ai act based on state of +board, and make their action a column num.
 
             make_move(board, column, player)
@@ -400,29 +434,6 @@ def train_ai(num_games):
 
 
 
-start = time.time() # amount of seconds from 1970
-# train before playing
-
-train_ai(1000) # CHANGE ME
-
-
-
-torch.save(policy_net.state_dict(), "connect4_model.pth") # save trained model
-# WARNING: will overwrite existing models if you train into same file name. DO NOT START PROGRAM WITH VALUABLE TRAINING.
-print("Model saved. In connect4/path") 
-
-end = time.time()
-
-print(str(end - start) + " seconds") # gives seconds it took to compute
-
-board = [
-[0, 0, 0, 0, 0, 0, 0],
-[0, 0, 0, 0, 0, 0, 0],
-[0, 0, 0, 0, 0, 0, 0],
-[0, 0, 0, 0, 0, 0, 0],
-[0, 0, 0, 0, 0, 0, 0],
-[0, 0, 0, 0, 0, 0, 0] ] # clears board after training
-
 print("Do you want to fight another player, or an AI?")
 
 enemy = input()
@@ -440,8 +451,41 @@ if enemy == "Player":
         print("Invalid player.")
         game = False
 
-elif enemy == "AI":
+elif enemy == "AI": # updated. allows player to choose to train an AI instead of training one on start.
+    print("Do you wish to train a new AI, or use a pre-trained one? (enter: train/use). Warning: unless you have changed the path, this will overwrite saved model.")
+    choice = input()
+    if choice == "train":
+        
+        start = time.time() # amount of seconds from 1970
 
+        train_ai(10000)  # CHANGE ME
+
+        torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
+
+        print("Model saved. In connect4/path") 
+
+        end = time.time()
+
+        print(str(end - start) + " seconds") # gives seconds it took to compute
+        board = [
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0] ] # clears board after training
+
+
+    elif choice == "use":
+        if os.path.exists("100kcopy_illegal.pth"):
+
+            policy_net.load_state_dict(torch.load("100kcopy_illegal.pth")) 
+
+        else:
+
+            print("Please enter 'train' or 'use'")
+
+            game = False
     ai = 2
     player = 1
 
