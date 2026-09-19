@@ -6,7 +6,13 @@ import random
 import math
 import time
 
-device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu" # will be gpu on pc
+if torch.cuda.is_available():
+    device = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    device = "mps"
+else:
+    device = "cpu"
+
 print(f"Using {device} device")
 
 learning_rate = 1e-3 # CHANGE ME, how big of a step do you take
@@ -85,7 +91,7 @@ board = [
     [0, 0, 0, 0, 0, 0, 0]
 ]
 
-board_tensor = torch.tensor(board)
+board_tensor = torch.tensor(board, device=device)
 
 
 float_tensor_board = board_tensor.float() # model inputs and outputs float, flattened board is long/int
@@ -94,19 +100,14 @@ print(float_tensor_board)
 print(float_tensor_board.shape)
 print(float_tensor_board.dtype)
 
-float_tensor_board = float_tensor_board.unsqueeze(0) # increase dimensionality
+float_tensor_board = float_tensor_board.unsqueeze(0).to(device) # increase dimensionality and match the model device
 
 output = model(float_tensor_board)
 
 print(output)
 print(output.shape)
-weight = torch.randn(42, 7, requires_grad=True) # for each possible choice we need 7 weights, each neuron will weigh each place?
-bias = torch.randn(7) # 7 output neurons
 
 float_tensor_board = float_tensor_board.flatten(start_dim=1, end_dim=2) # flatten board to 2d
-trained_data = torch.matmul(float_tensor_board, weight) + bias # z=Wx+b
-loss = torch.nn.functional.binary_cross_entropy_with_logits(trained_data, output)
-loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
 '''
@@ -180,7 +181,6 @@ def select_action (state):
     if epsilon is bigger, than return a random choice from n_actions = 7, with device, as a tensor
     ''' 
 
-
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
@@ -203,18 +203,20 @@ def optimize_model():
     action_batch = torch.cat(batch.action)
     reward_batch = torch.cat(batch.reward)
 
+    # q(s, a) for the action actually taken
     state_action_values = policy_net(state_batch).gather(1, action_batch)
 
+    # default vals
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
 
-    with torch.no_grad(): # no grad because we don't want it to influence net
-        next_state_values[non_final_mask] = target_net(
-            non_final_next_states
-        ).max(1).values
+    with torch.no_grad():
+        next_state_values[non_final_mask] = (
+            target_net(non_final_next_states).max(1).values
+        )
 
-    expected_action_values = (next_state_values * GAMMA) + reward_batch # q values
-
-    # huber loss
+    # next_state is from the OPPONENT'S perspective,
+    # so their good position is bad for us.
+    expected_action_values = reward_batch - (GAMMA * next_state_values)
 
     loss = criterion(
         state_action_values,
@@ -222,8 +224,13 @@ def optimize_model():
     )
 
     optimizer.zero_grad()
-    loss.backward() # taking backpropagation
-    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
+    loss.backward()
+
+    torch.nn.utils.clip_grad_value_(
+        policy_net.parameters(),
+        100
+    )
+
     optimizer.step()
 
 
@@ -287,13 +294,23 @@ def make_move(board, column, player):
     return None
 
 
-def get_state(board):
-    return torch.tensor( # return tensor of board
-        board,
+def get_state(board, player):
+    opponent = 2 if player == 1 else 1
+
+    state = [
+        [
+            1 if cell == player
+            else -1 if cell == opponent
+            else 0
+            for cell in row
+        ]
+        for row in board
+    ]
+    return torch.tensor(
+        state,
         dtype=torch.float32,
         device=device
     ).unsqueeze(0)
-
 
 def show_board():
     for row in board:
@@ -323,7 +340,7 @@ def train_ai(num_games):
             if not legal_actions:
                 break
 
-            state = get_state(board)
+            state = get_state(board, player)
 
             action = select_action(state)
             column = action.item() # make ai act based on state of +board, and make their action a column num.
@@ -351,7 +368,8 @@ def train_ai(num_games):
                 game_over = True
 
             else:
-                next_state = get_state(board)
+                next_player = 2 if player == 1 else 1
+                next_state = get_state(board, next_player)
                 reward = torch.tensor([0.0], device=device)
 
                 memory.push(
@@ -384,14 +402,18 @@ def train_ai(num_games):
 
 start = time.time() # amount of seconds from 1970
 # train before playing
+
 train_ai(1000) # CHANGE ME
 
+
+
 torch.save(policy_net.state_dict(), "connect4_model.pth") # save trained model
+# WARNING: will overwrite existing models if you train into same file name. DO NOT START PROGRAM WITH VALUABLE TRAINING.
 print("Model saved. In connect4/path") 
 
 end = time.time()
 
-print(end - start + " seconds") # gives seconds it took to compute
+print(str(end - start) + " seconds") # gives seconds it took to compute
 
 board = [
 [0, 0, 0, 0, 0, 0, 0],
@@ -437,7 +459,7 @@ while game:
 
     if enemy == "AI" and player == ai:
 
-        state = get_state(board)
+        state = get_state(board, player)
 
         legal_actions = get_legal_actions(board)
 
