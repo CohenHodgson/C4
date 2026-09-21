@@ -458,7 +458,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
         
         start = time.time() # amount of seconds from 1970
 
-        train_ai(10000)  # CHANGE ME
+        train_ai(1000000)  # CHANGE ME
 
         torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
 
