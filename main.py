@@ -16,10 +16,6 @@ else:
 
 print(f"Using {device} device")
 
-learning_rate = 1e-3 # CHANGE ME, how big of a step do you take
-batch_size = 64 # CHANGE ME, how many experinces for a weight update.
-
-
 class NeuralNetwork(nn.Module):
     def forward(self, x): # data goes through, x = linearized board, self = network
         x = self.flatten(x) # x = result of flatten
@@ -109,7 +105,6 @@ print(output)
 print(output.shape)
 
 float_tensor_board = float_tensor_board.flatten(start_dim=1, end_dim=2) # flatten board to 2d
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 
 '''
 Q is defined as Q(s,a), where s is state, and a is action, 
@@ -126,15 +121,15 @@ pi(s') is the plan of action after move.
 all together, it reads the q value, as defined by policy, is equal to the 
 reward plus how much future rewards matter times 
 Q policy which is dependant on the future moves/weightings (s,a vs s',a')
-'''
 
-# BATCH_SIZE is the number of transitions sampled from the replay buffer
-# GAMMA is the discount factor as mentioned in the previous section
-# EPS_START is the starting value of epsilon
-# EPS_END is the final value of epsilon
-# EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
-# TAU is the update rate of the target network
-# LR is the learning rate of the ``AdamW`` optimizer
+BATCH_SIZE is the number of transitions sampled from the replay buffer
+GAMMA is the discount factor as mentioned in the previous section
+EPS_START is the starting value of epsilon
+EPS_END is the final value of epsilon
+EPS_DECAY controls the rate of exponential decay of epsilon, higher means a slower decay
+TAU is the update rate of the target network
+LR is the learning rate of the AdamW optimizer
+'''
 
 BATCH_SIZE = 32
 GAMMA = 0.99
@@ -254,10 +249,7 @@ def optimize_model():
     optimizer.zero_grad()
     loss.backward()
 
-    torch.nn.utils.clip_grad_value_(
-        policy_net.parameters(),
-        100
-    )
+    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 1.0)
 
     optimizer.step()
 
@@ -272,8 +264,8 @@ win_length = 4
 directions = {
     "horizontal": (0, 1),
     "vertical": (1, 0),
-    "diagonal_up": (1, 1), # top-left to bottom-right
-    "diagonal_down": (1, -1) # top-right to bottom-left
+    "diag_neg": (1, 1), # top-left to bottom-right / neg slope
+    "diag_pos": (1, -1) # top-right to bottom-left / pos slope
 }
 
 
@@ -300,19 +292,19 @@ def check_vertical(board, y, x, player):
     return count_line(board, y, x, *directions["vertical"], player) >= win_length
 
 
-def check_diag_down(board, y, x, player):
-    return count_line(board, y, x, *directions["diag_down"], player) >= win_length
+def check_diag_neg(board, y, x, player):
+    return count_line(board, y, x, *directions["diag_neg"], player) >= win_length
 
 
-def check_diag_up(board, y, x, player):
-    return count_line(board, y, x, *directions["diag_up"], player) >= win_length
+def check_diag_pos(board, y, x, player):
+    return count_line(board, y, x, *directions["diag_pos"], player) >= win_length
 
 
 win_check = (
     check_horizontal,
     check_vertical,
-    check_diag_down,
-    check_diag_up,
+    check_diag_neg,
+    check_diag_pos,
 )
 
 
@@ -402,20 +394,15 @@ def train_ai(num_games):
             action = select_action(state, legal_actions) # adding legal actions so ai can't make illegal moves
             column = action.item() # make ai act based on state of +board, and make their action a column num.
 
-            make_move(board, column, player)
-
-            winner = check_win(board)
+            row = make_move(board, column, player)
+            if row is None:
+                break  # column is full; shouldn't happen because of legal_actions, but safe
+            winner = check_win(board, (row, column))
 
             if winner == player:
                 reward = torch.tensor([1.0], device=device)
                 memory.push(state, action, None, reward) # push transition
                 optimize_model() # optimize based on transition
-                game_over = True
-
-            elif winner != 0:
-                reward = torch.tensor([-1.0], device=device)
-                memory.push(state, action, None, reward)
-                optimize_model()
                 game_over = True
 
             elif not get_legal_actions(board):
@@ -457,6 +444,8 @@ def train_ai(num_games):
 
 
 
+game = True
+
 print("Do you want to fight another player, or an AI?")
 
 enemy = input()
@@ -479,7 +468,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
     choice = input()
     if choice == "train":
         
-        start = time.time() # amount of seconds from 1970
+        start = time.time()
 
         train_ai(1000000)  # CHANGE ME
 
@@ -489,7 +478,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
 
         end = time.time()
 
-        print(str(end - start) + " seconds") # gives seconds it took to compute
+        print(str(end - start) + " seconds")
         board = [
         [0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0],
@@ -500,9 +489,9 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
 
 
     elif choice == "use":
-        if os.path.exists("100kcopy_illegal.pth"):
+        if os.path.exists("connect4_model.pth"):
 
-            policy_net.load_state_dict(torch.load("100kcopy_illegal.pth")) 
+            policy_net.load_state_dict(torch.load("connect4_model.pth")) # CHANGE ME
 
         else:
 
@@ -516,8 +505,6 @@ else:
     print("Please enter either 'AI' or 'Player'")
     game = False
 
-
-game = True
 
 while game:
 
@@ -565,9 +552,9 @@ while game:
         print("That column is full.")
         continue
 
-    board[choices[-1]][column_num] = player
-
-    winner = check_win(board)
+    row = choices[-1]
+    board[row][column_num] = player
+    winner = check_win(board, (row, column_num))
 
     if winner != 0:
         show_board()
