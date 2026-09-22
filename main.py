@@ -53,13 +53,8 @@ next_state = board after move
 reward = what happens because of move
 '''
 
-class ReplayMemory(object): # uhh, the memory.
+class ReplayMemory(object): # the memory.
     def __init__(self, capacity): 
-        ''' 
-        aside from acting on behalf of the replayer memory, 
-        replay memory is reffered to as an object, 
-        call replaymemory with number and it'll reference the number to func
-        '''
         self.memory = deque([], maxlen=capacity) # deque has special commands letting it remove and add things easier from right and left sides.
         '''
         deque[] makes it start with empty. maxlen=capacity means, 
@@ -89,7 +84,6 @@ board = [
 ]
 
 board_tensor = torch.tensor(board, device=device)
-
 
 float_tensor_board = board_tensor.float() # model inputs and outputs float, flattened board is long/int
 
@@ -135,13 +129,11 @@ BATCH_SIZE = 32
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY = 2500
+EPS_DECAY = 100_000 # meaning, for 40% of training, it explores instead of trying to find good plays in bad playset.
 TAU = 0.005
-LR = 3e-4
+LR = 3e-5 # lowering by 10x.
 
 n_actions = 7 # number of possible actions in env
-
-n_observations = 42 # places to check
 
 policy_net = NeuralNetwork().to(device) # network training
 target_net = NeuralNetwork().to(device) # delayed copy for Q
@@ -152,7 +144,7 @@ optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
 
 criterion = nn.SmoothL1Loss()
 
-memory = ReplayMemory(10000)
+memory = ReplayMemory(100000) # CHANGE ME
 
 steps_done = 0
 
@@ -249,7 +241,7 @@ def optimize_model():
     optimizer.zero_grad()
     loss.backward()
 
-    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 1.0)
+    torch.nn.utils.clip_grad_value_(policy_net.parameters(), clip_value = 1.0)
 
     optimizer.step()
 
@@ -470,7 +462,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
         
         start = time.time()
 
-        train_ai(1000000)  # CHANGE ME
+        train_ai(100000)  # CHANGE ME
 
         torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
 
