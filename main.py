@@ -7,6 +7,19 @@ import random
 import math
 import time
 
+
+'''
+
+NEXT: 
+custom file entry/model select
+Make AIs fight each other
+Make pre-trained models for 
+100, 1k, 10k, 100k and 1 million as base models to defeat.
+
+'''
+
+
+
 if torch.cuda.is_available():
     device = "cuda"
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -35,11 +48,6 @@ class NeuralNetwork(nn.Module):
         
 model = NeuralNetwork().to(device)
 print(model)
-
-X = torch.rand(1, 6, 7, device=device) # one board, 6 rows, 7 columns
-logits = model(X) # call model on x
-y_pred = logits.argmax(1) # find the index of the greatest score
-print(f"Predicted class: {y_pred}") # prints what the model thinks is best.
 
 transition = namedtuple('transition', ('state', 'action', 'next_state', 'reward'))
 
@@ -83,23 +91,6 @@ board = [
     [0, 0, 0, 0, 0, 0, 0]
 ]
 
-board_tensor = torch.tensor(board, device=device)
-
-float_tensor_board = board_tensor.float() # model inputs and outputs float, flattened board is long/int
-
-print(float_tensor_board)
-print(float_tensor_board.shape)
-print(float_tensor_board.dtype)
-
-float_tensor_board = float_tensor_board.unsqueeze(0).to(device) # increase dimensionality and match the model device
-
-output = model(float_tensor_board)
-
-print(output)
-print(output.shape)
-
-float_tensor_board = float_tensor_board.flatten(start_dim=1, end_dim=2) # flatten board to 2d
-
 '''
 Q is defined as Q(s,a), where s is state, and a is action, 
 so board state and column_num
@@ -125,13 +116,13 @@ TAU is the update rate of the target network
 LR is the learning rate of the AdamW optimizer
 '''
 
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY = 100_000 # meaning, for 40% of training, it explores instead of trying to find good plays in bad playset.
+EPS_DECAY = 50_000 # meaning, for 40% of training, it explores instead of trying to find good plays in bad playset, decays per turn.
 TAU = 0.005
-LR = 3e-5 # lowering by 10x.
+LR = 1e-4
 
 n_actions = 7 # number of possible actions in env
 
@@ -144,7 +135,7 @@ optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
 
 criterion = nn.SmoothL1Loss()
 
-memory = ReplayMemory(100000) # CHANGE ME
+memory = ReplayMemory(200_000) # CHANGE ME. same as eps_decay, counts per turn.
 
 steps_done = 0
 
@@ -373,6 +364,7 @@ def train_ai(num_games):
 
         player = 1
         game_over = False
+        prev = None # keeps track of previous games
 
         while game_over == False: # complicated self-play for training
 
@@ -383,39 +375,65 @@ def train_ai(num_games):
 
             state = get_state(board, player)
 
+            # Random opening moves to diversify training positions.
+            moves_played = 42 - sum(row.count(0) for row in board)
+            if moves_played < 4 and random.random() < 0.5:
+                column = random.choice(legal_actions)
+                action = torch.tensor([[column]], device=device, dtype=torch.long)
+
             action = select_action(state, legal_actions) # adding legal actions so ai can't make illegal moves
             column = action.item() # make ai act based on state of +board, and make their action a column num.
 
             row = make_move(board, column, player)
+
+
             if row is None:
-                break  # column is full; shouldn't happen because of legal_actions, but safe
+                break
             winner = check_win(board, (row, column))
 
             if winner == player:
+
                 reward = torch.tensor([1.0], device=device)
                 memory.push(state, action, None, reward) # push transition
+
+                if prev is not None:
+                    memory.push(prev[0], prev[1], None,
+                                
+                                torch.tensor([-1.0], device=device))
                 optimize_model() # optimize based on transition
+                optimize_model()
+                optimize_model()
+                optimize_model()
                 game_over = True
 
             elif not get_legal_actions(board):
+
                 reward = torch.tensor([0.0], device=device)
                 memory.push(state, action, None, reward)
+
+                if prev is not None:
+                    memory.push(prev[0], prev[1], None,
+                                torch.tensor([0.0], device=device)) # push to empty tensor
+                optimize_model()
+                optimize_model()
+                optimize_model()
                 optimize_model()
                 game_over = True
 
             else:
-                next_player = 2 if player == 1 else 1
-                next_state = get_state(board, next_player)
-                reward = torch.tensor([0.0], device=device)
-
-                memory.push(
-                    state,
-                    action,
-                    next_state,
-                    reward
-                )
-
-                optimize_model()
+                # push the PREVIOUS move as non-terminal (not the current one)
+                if prev is not None:
+                    memory.push(
+                        prev[0],                                          
+                        prev[1],
+                        state,
+                        torch.tensor([0.0], device=device)
+                    )
+                    optimize_model()
+                    optimize_model()
+                    optimize_model()
+                    optimize_model()
+                prev = (state, action) 
 
             player = 2 if player == 1 else 1
 
@@ -433,7 +451,6 @@ def train_ai(num_games):
 
         if (episode + 1) % 100 == 0:
             print(f"Finished {episode + 1}/{num_games} games")
-
 
 
 game = True
@@ -462,7 +479,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
         
         start = time.time()
 
-        train_ai(100000)  # CHANGE ME
+        train_ai(10_000)  # CHANGE ME
 
         torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
 
