@@ -77,9 +77,9 @@ Thank you to the folks who made the PyTorch Tutorial.
 This project follows two official PyTorch tutorials:
 
 - [Learn the Basics](https://docs.pytorch.org/tutorials/beginner/basics/intro.html)
-  for the general PyTorch workflow (tensors, model definition, optimization).
+  for the general PyTorch workflow: tensors, model definition and optimization.
 - [Reinforcement Learning (DQN) Tutorial](https://docs.pytorch.org/tutorials/intermediate/reinforcement_q_learning.html)
-  for the DQN architecture: replay memory, target network and the optimization loop.
+  for the DQN architecture: replay memory, target network and the optimization loop (optimize_model).
 
 ## License
 
