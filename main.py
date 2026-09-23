@@ -16,6 +16,16 @@ Make AIs fight each other
 Make pre-trained models for 
 100, 1k, 10k, 100k and 1 million as base models to defeat.
 
+ALSO:
+optim idea,
+what if you only scanned playable rows?
+would that be more or less efficient?
+combining lowest row (where player can place token)
+and valid rows and last played token, as opposed to just
+scanning around the entire token, regardless of position.
+if in row x, check above row x if highest move is above row x.
+Should be more efficient by at max 6x?
+
 '''
 
 
@@ -120,7 +130,7 @@ BATCH_SIZE = 64
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY = 50_000 # meaning, for 40% of training, it explores instead of trying to find good plays in bad playset, decays per turn.
+EPS_DECAY = 500_000 # meaning, for 40% of training, it explores instead of trying to find good plays in bad playset, decays per turn.
 TAU = 0.005
 LR = 1e-4
 
@@ -135,7 +145,7 @@ optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
 
 criterion = nn.SmoothL1Loss()
 
-memory = ReplayMemory(200_000) # CHANGE ME. same as eps_decay, counts per turn.
+memory = ReplayMemory(400_000) # CHANGE ME. same as eps_decay, counts per turn.
 
 steps_done = 0
 
@@ -380,9 +390,9 @@ def train_ai(num_games):
             if moves_played < 4 and random.random() < 0.5:
                 column = random.choice(legal_actions)
                 action = torch.tensor([[column]], device=device, dtype=torch.long)
-
-            action = select_action(state, legal_actions) # adding legal actions so ai can't make illegal moves
-            column = action.item() # make ai act based on state of +board, and make their action a column num.
+            else:
+                action = select_action(state, legal_actions) # adding legal actions so ai can't make illegal moves
+                column = action.item() # make ai act based on state of +board, and make their action a column num.
 
             row = make_move(board, column, player)
 
@@ -479,7 +489,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
         
         start = time.time()
 
-        train_ai(10_000)  # CHANGE ME
+        train_ai(100_000)  # CHANGE ME
 
         torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
 
