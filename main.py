@@ -15,6 +15,7 @@ custom file entry/model select
 Make AIs fight each other
 Make pre-trained models for 
 100, 1k, 10k, 100k and 1 million as base models to defeat.
+Start: front-end with Flask or Djanjo (recommended Djanjo)
 
 ALSO:
 optim idea,
