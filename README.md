@@ -5,6 +5,8 @@ The AI is a small DQN (Deep Q-Network) trained by playing against
 itself. You can train a new model from scratch or play against a
 pre-trained one.
 
+View "noCom.py" for the un-commented code.
+
 ## Requirements
 
 - Python 3.12+
