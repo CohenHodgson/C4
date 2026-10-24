@@ -14,6 +14,8 @@ View "noCom.py" for the un-commented code.
 
 ## Setup
 
+Alternatively, you can now open the `connect4.html` file and play through your browser. Training models still needs to be done through the python interface.
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
