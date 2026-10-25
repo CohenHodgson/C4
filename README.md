@@ -1,4 +1,4 @@
-<img width="554" height="697" alt="2026-10-24_19-42" src="https://github.com/user-attachments/assets/4dc3688c-b845-4948-9357-d1a4146d250d" />
+<img width="783" height="718" alt="2026-10-24_19-46" src="https://github.com/user-attachments/assets/a087360e-6c28-4e54-a302-05ffe454dd56" />
 
 **Figure 1.1:** Screenshot of `index.html`
 
