@@ -9,13 +9,11 @@ import time
 
 
 '''
-
 NEXT: 
 custom file entry/model select
 Make AIs fight each other
 Make pre-trained models for 
 100, 1k, 10k, 100k and 1 million as base models to defeat.
-Start: front-end with Flask or Djanjo (recommended Djanjo)
 
 ALSO:
 optim idea,
@@ -63,15 +61,6 @@ print(model)
 transition = namedtuple('transition', ('state', 'action', 'next_state', 'reward'))
 
 
-'''
-here, transition is the container for state, action, next_state and reward.
-
-state = board before move
-action = move ai makes
-next_state = board after move
-reward = what happens because of move
-'''
-
 class ReplayMemory(object): # the memory.
     def __init__(self, capacity): 
         self.memory = deque([], maxlen=capacity) # deque has special commands letting it remove and add things easier from right and left sides.
@@ -79,16 +68,21 @@ class ReplayMemory(object): # the memory.
         deque[] makes it start with empty. maxlen=capacity means, 
         do not let memory grow beyond set capacity, e.g., 10,000 games.
         '''
-    def push(self, *args):
-        self.memory.append(transition(*args))
-        '''
-        pass its arguements and use self to access memory. 
-        '''
+    def push(self, state, action, next_state, reward):
+        state = state.detach().cpu().clone()
+        action = action.detach().cpu().clone()
+        reward = reward.detach().cpu().clone()
+
+        if next_state is not None:
+            next_state = next_state.detach().cpu().clone()
+
+        self.memory.append(
+            transition(state, action, next_state, reward)
+    )
+        
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
-        '''
-        random(pop, k) k is batch size
-        '''
+
     def __len__(self): # gives length of object
         return len(self.memory)
 
@@ -134,6 +128,7 @@ EPS_END = 0.01
 EPS_DECAY = 500_000 # meaning, for 40% of training, it explores instead of trying to find good plays in bad playset, decays per turn.
 TAU = 0.005
 LR = 1e-4
+UPDATES_PER_TRANSITION = 1
 
 n_actions = 7 # number of possible actions in env
 
@@ -146,7 +141,7 @@ optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
 
 criterion = nn.SmoothL1Loss()
 
-memory = ReplayMemory(400_000) # CHANGE ME. same as eps_decay, counts per turn.
+memory = ReplayMemory(400_000) # CHANGE ME. same as eps_decay, counts per turn/transition of board state.
 
 steps_done = 0
 
@@ -176,7 +171,7 @@ def select_action(state, legal_actions):
 
         with torch.no_grad(): # disables gradient calc, also a decorator
 
-            q_values = policy_net(state)[0]
+            q_values = policy_net(state.to(device))[0] # only when device needs it
 
             for column in range(n_actions):
                 if column not in legal_actions:
@@ -194,59 +189,78 @@ def select_action(state, legal_actions):
 
     '''
 
+
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
 
     transitions = memory.sample(BATCH_SIZE)
-
     batch = transition(*zip(*transitions))
 
-    non_final_mask = torch.tensor(
-        tuple(map(lambda s: s is not None, batch.next_state)),
-        device=device,
-        dtype=torch.bool
+    state_batch = torch.cat(batch.state).to(device)
+    action_batch = torch.cat(batch.action).to(device)
+    reward_batch = torch.cat(batch.reward).to(device)
+
+    # q-values for the actions actually taken.
+    state_action_values = policy_net(state_batch).gather(
+        1, action_batch
+    ).squeeze(1)
+
+    # terminal transitions have no future value.
+    next_state_values = torch.zeros(
+        BATCH_SIZE, device=device
     )
 
-    non_final_next_states = torch.cat(
-        [s for s in batch.next_state if s is not None]
+    non_final_states = [
+        s for s in batch.next_state if s is not None
+    ]
+
+    if non_final_states:
+        non_final_mask = torch.tensor(
+            [s is not None for s in batch.next_state],
+            device=device,
+            dtype=torch.bool
+        )
+
+        non_final_next_states = torch.cat(
+            non_final_states
+        ).to(device)
+
+        with torch.no_grad():
+            next_q_values = target_net(non_final_next_states)
+
+            # a column is legal if its top cell is empty.
+            legal_mask = non_final_next_states[:, 0, :] == 0
+            next_q_values = next_q_values.masked_fill(
+                ~legal_mask, float("-inf")
+            )
+
+            next_state_values[non_final_mask] = (
+                next_q_values.max(dim=1).values
+            )
+
+    # the next state is from the opponent's perspective.
+    expected_action_values = (
+        reward_batch - GAMMA * next_state_values
     )
-
-    state_batch = torch.cat(batch.state)
-    action_batch = torch.cat(batch.action)
-    reward_batch = torch.cat(batch.reward)
-
-    # q(s, a) for the action actually taken
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
-
-    # default vals
-    next_state_values = torch.zeros(BATCH_SIZE, device=device)
-
-    with torch.no_grad():
-        next_q_values = target_net(non_final_next_states)
-
-        legal_mask = non_final_next_states[:, 0, :] == 0 # batch, row, column. : every board, 0 row 0, : every column. if any are illegal then its made 0 (False)
-
-        next_q_values[~legal_mask] = float("-inf") # ~ is a nishe operator that inverts boolean. -inf = neg infinity.
-
-        next_state_values[non_final_mask] = next_q_values.max(1).values # self-explanatory, max q value for each board in batch
-
-        # next_state is from the OPPONENT'S perspective,
-        # so their good position is bad for us.
-        expected_action_values = reward_batch - (GAMMA * next_state_values)
 
     loss = criterion(
         state_action_values,
-        expected_action_values.unsqueeze(1)
+        expected_action_values
     )
 
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
     loss.backward()
 
-    torch.nn.utils.clip_grad_value_(policy_net.parameters(), clip_value = 1.0)
+    torch.nn.utils.clip_grad_value_(
+        policy_net.parameters(), clip_value=1.0
+    )
 
     optimizer.step()
 
+def optimize_steps():
+    for _ in range(UPDATES_PER_TRANSITION):
+        optimize_model()
 
 # game code below
 
@@ -329,7 +343,7 @@ def get_legal_actions(board): # return if column in range and is empty
 
 
 def make_move(board, column, player):
-    for row in range(5, -1, -1): # count all rows: start;stop;step
+    for row in range(5, -1, -1): # count all rows: start;stop;step. backwards because it counts down -> up (more effcient)
         if board[row][column] == 0:
             board[row][column] = player
             return row
@@ -349,11 +363,8 @@ def get_state(board, player):
         ]
         for row in board
     ]
-    return torch.tensor(
-        state,
-        dtype=torch.float32,
-        device=device
-    ).unsqueeze(0)
+
+    return torch.tensor(state, dtype=torch.float32).unsqueeze(0)
 
 def show_board():
     for row in board:
@@ -411,10 +422,7 @@ def train_ai(num_games):
                     memory.push(prev[0], prev[1], None,
                                 
                                 torch.tensor([-1.0], device=device))
-                optimize_model() # optimize based on transition
-                optimize_model()
-                optimize_model()
-                optimize_model()
+                optimize_steps()
                 game_over = True
 
             elif not get_legal_actions(board):
@@ -425,10 +433,7 @@ def train_ai(num_games):
                 if prev is not None:
                     memory.push(prev[0], prev[1], None,
                                 torch.tensor([0.0], device=device)) # push to empty tensor
-                optimize_model()
-                optimize_model()
-                optimize_model()
-                optimize_model()
+                optimize_steps()
                 game_over = True
 
             else:
@@ -440,14 +445,13 @@ def train_ai(num_games):
                         state,
                         torch.tensor([0.0], device=device)
                     )
-                    optimize_model()
-                    optimize_model()
-                    optimize_model()
-                    optimize_model()
+                    optimize_steps()
                 prev = (state, action) 
 
             player = 2 if player == 1 else 1
 
+
+        
         # update net
         target_net_state_dict = target_net.state_dict()
         policy_net_state_dict = policy_net.state_dict()
@@ -484,20 +488,21 @@ if enemy == "Player":
         game = False
 
 elif enemy == "AI": # updated. allows player to choose to train an AI instead of training one on start.
-    print("Do you wish to train a new AI, or use a pre-trained one? (enter: train/use). Warning: unless you have changed the path, this will overwrite saved model.")
+    print("Do you wish to train a new AI, or use a pre-trained one? (enter: train/use).\n\nWARNING: unless you have changed the path, this will overwrite saved model.")
     choice = input()
     if choice == "train":
         
-        start = time.time()
+        start = time.perf_counter()
 
-        train_ai(100_000)  # CHANGE ME
+        train_ai(50000)  # CHANGE ME
 
         torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
 
         print("Model saved. In connect4/path") 
 
-        end = time.time()
+        end = time.perf_counter() - start
 
+        
         print(str(end - start) + " seconds")
         board = [
         [0, 0, 0, 0, 0, 0, 0],
@@ -511,7 +516,7 @@ elif enemy == "AI": # updated. allows player to choose to train an AI instead of
     elif choice == "use":
         if os.path.exists("connect4_model.pth"):
 
-            policy_net.load_state_dict(torch.load("connect4_model.pth")) # CHANGE ME
+            policy_net.load_state_dict(torch.load("50k.pth", map_location=device, weights_only=True)) # CHANGE ME
 
         else:
 
@@ -538,7 +543,7 @@ while game:
         legal_actions = get_legal_actions(board)
 
         with torch.no_grad():
-            q_values = policy_net(state)[0]
+            q_values = policy_net(state.to(device))[0]
 
             # Prevent full columns from being selected
             for column in range(7):
