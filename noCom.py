@@ -1,4 +1,4 @@
-```python
+python
 import os
 import torch
 from torch import nn
@@ -524,4 +524,3 @@ while game:
         player = 2
     else:
         player = 1
-```
