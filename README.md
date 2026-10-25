@@ -1,3 +1,7 @@
+<img width="554" height="697" alt="2026-10-24_19-42" src="https://github.com/user-attachments/assets/4dc3688c-b845-4948-9357-d1a4146d250d" />
+
+**Figure 1.1:** Screenshot of `index.html`
+
 # Connect Four AI
 
 A self-play Connect Four AI written in Python 3.12 with PyTorch.
