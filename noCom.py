@@ -1,4 +1,5 @@
-import os # for file save
+```python
+import os
 import torch
 from torch import nn
 import torch.optim as optim
@@ -8,8 +9,14 @@ import math
 import time
 
 
+if torch.cuda.is_available():
+    device = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    device = "mps"
+else:
+    device = "cpu"
 
-device = "cpu"
+print(f"Using {device} device")
 
 
 class NeuralNetwork(nn.Module):
@@ -18,7 +25,7 @@ class NeuralNetwork(nn.Module):
         logits = self.linear_relu_stack(x)
         return logits
 
-    def __init__(self): 
+    def __init__(self):
         super().__init__()
         self.flatten = nn.Flatten()
         self.linear_relu_stack = nn.Sequential(
@@ -26,24 +33,35 @@ class NeuralNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 48),
             nn.ReLU(),
-            nn.Linear(48,7),
+            nn.Linear(48, 7),
         )
-        
+
+
 model = NeuralNetwork().to(device)
 print(model)
 
 transition = namedtuple('transition', ('state', 'action', 'next_state', 'reward'))
 
+
 class ReplayMemory(object):
-    def __init__(self, capacity): 
+    def __init__(self, capacity):
         self.memory = deque([], maxlen=capacity)
 
-    def push(self, *args):
-        self.memory.append(transition(*args))
+    def push(self, state, action, next_state, reward):
+        state = state.detach().cpu().clone()
+        action = action.detach().cpu().clone()
+        reward = reward.detach().cpu().clone()
+
+        if next_state is not None:
+            next_state = next_state.detach().cpu().clone()
+
+        self.memory.append(
+            transition(state, action, next_state, reward)
+        )
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
-    
+
     def __len__(self):
         return len(self.memory)
 
@@ -57,13 +75,15 @@ board = [
     [0, 0, 0, 0, 0, 0, 0]
 ]
 
+
 BATCH_SIZE = 64
 GAMMA = 0.99
 EPS_START = 0.9
 EPS_END = 0.01
-EPS_DECAY = 50_000
+EPS_DECAY = 500_000
 TAU = 0.005
 LR = 1e-4
+UPDATES_PER_TRANSITION = 1
 
 n_actions = 7
 
@@ -72,115 +92,136 @@ target_net = NeuralNetwork().to(device)
 
 target_net.load_state_dict(policy_net.state_dict())
 
-optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad=True)
+optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
 
 criterion = nn.SmoothL1Loss()
 
-memory = ReplayMemory(200_000)
+memory = ReplayMemory(400_000)
 
 steps_done = 0
 
 
-def select_action(state, legal_actions): 
-
+def select_action(state, legal_actions):
     global steps_done
 
     sample = random.random()
 
-    eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. *steps_done / EPS_DECAY)
+    eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * steps_done / EPS_DECAY)
 
     steps_done += 1
+
     if sample > eps_threshold:
-
-        with torch.no_grad(): 
-
-            q_values = policy_net(state)[0]
+        with torch.no_grad():
+            q_values = policy_net(state.to(device))[0]
 
             for column in range(n_actions):
                 if column not in legal_actions:
                     q_values[column] = float("-inf")
 
-            return q_values.argmax().view(1,1)
+            return q_values.argmax().view(1, 1)
 
     else:
-
         return torch.tensor([[random.choice(legal_actions)]], device=device, dtype=torch.long)
+
 
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
 
     transitions = memory.sample(BATCH_SIZE)
-
     batch = transition(*zip(*transitions))
 
-    non_final_mask = torch.tensor(
-        tuple(map(lambda s: s is not None, batch.next_state)),
-        device=device,
-        dtype=torch.bool
+    state_batch = torch.cat(batch.state).to(device)
+    action_batch = torch.cat(batch.action).to(device)
+    reward_batch = torch.cat(batch.reward).to(device)
+
+    state_action_values = policy_net(state_batch).gather(
+        1, action_batch
+    ).squeeze(1)
+
+    next_state_values = torch.zeros(
+        BATCH_SIZE, device=device
     )
 
-    non_final_next_states = torch.cat(
-        [s for s in batch.next_state if s is not None]
+    non_final_states = [
+        s for s in batch.next_state if s is not None
+    ]
+
+    if non_final_states:
+        non_final_mask = torch.tensor(
+            [s is not None for s in batch.next_state],
+            device=device,
+            dtype=torch.bool
+        )
+
+        non_final_next_states = torch.cat(
+            non_final_states
+        ).to(device)
+
+        with torch.no_grad():
+            next_q_values = target_net(non_final_next_states)
+
+            legal_mask = non_final_next_states[:, 0, :] == 0
+            next_q_values = next_q_values.masked_fill(
+                ~legal_mask, float("-inf")
+            )
+
+            next_state_values[non_final_mask] = (
+                next_q_values.max(dim=1).values
+            )
+
+    expected_action_values = (
+        reward_batch - GAMMA * next_state_values
     )
-
-    state_batch = torch.cat(batch.state)
-    action_batch = torch.cat(batch.action)
-    reward_batch = torch.cat(batch.reward)
-
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
-
-    next_state_values = torch.zeros(BATCH_SIZE, device=device)
-
-    with torch.no_grad():
-        next_q_values = target_net(non_final_next_states)
-
-        legal_mask = non_final_next_states[:, 0, :] == 0
-
-        next_q_values[~legal_mask] = float("-inf")
-
-        next_state_values[non_final_mask] = next_q_values.max(1).values
-
-        expected_action_values = reward_batch - (GAMMA * next_state_values)
 
     loss = criterion(
         state_action_values,
-        expected_action_values.unsqueeze(1)
+        expected_action_values
     )
 
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
     loss.backward()
 
-    torch.nn.utils.clip_grad_value_(policy_net.parameters(), clip_value = 1.0)
+    torch.nn.utils.clip_grad_value_(
+        policy_net.parameters(), clip_value=1.0
+    )
 
     optimizer.step()
 
 
+def optimize_steps():
+    for _ in range(UPDATES_PER_TRANSITION):
+        optimize_model()
+
+
 rows = 6
 columns = 7
-
 win_length = 4
 
 directions = {
     "horizontal": (0, 1),
     "vertical": (1, 0),
     "diag_neg": (1, 1),
-    "diag_pos": (1, -1) 
+    "diag_pos": (1, -1)
 }
 
 
 def in_bounds(y, x):
     return 0 <= y < rows and 0 <= x < columns
 
-def count_line(board, y, x, dy, dx, player): 
+
+def count_line(board, y, x, dy, dx, player):
     count = 1
+
     for direc in (1, -1):
         next_y = y + direc * dy
         next_x = x + direc * dx
+
         while in_bounds(next_y, next_x) and board[next_y][next_x] == player:
             count += 1
             next_y += direc * dy
             next_x += direc * dx
+
     return count
 
 
@@ -209,9 +250,9 @@ win_check = (
 
 
 def check_win(board, last_move):
-    """Return the winning player (1 or 2) or 0 if nobody won."""
     y, x = last_move
     player = board[y][x]
+
     if player == 0:
         return 0
 
@@ -222,16 +263,14 @@ def check_win(board, last_move):
     return 0
 
 
-
-
-def get_legal_actions(board): 
-
+def get_legal_actions(board):
     legal_actions = []
-        
-    for column in range (7):
+
+    for column in range(7):
         if board[0][column] == 0:
             legal_actions.append(column)
-    return legal_actions    
+
+    return legal_actions
 
 
 def make_move(board, column, player):
@@ -255,21 +294,19 @@ def get_state(board, player):
         ]
         for row in board
     ]
-    return torch.tensor(
-        state,
-        dtype=torch.float32,
-        device=device
-    ).unsqueeze(0)
+
+    return torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+
 
 def show_board():
     for row in board:
         print(row)
 
+
 def train_ai(num_games):
     global board
 
-    for episode in range(num_games): 
-
+    for episode in range(num_games):
         board = [
             [0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0],
@@ -281,10 +318,9 @@ def train_ai(num_games):
 
         player = 1
         game_over = False
-        prev = None 
+        prev = None
 
-        while game_over == False: 
-
+        while game_over == False:
             legal_actions = get_legal_actions(board)
 
             if not legal_actions:
@@ -293,62 +329,62 @@ def train_ai(num_games):
             state = get_state(board, player)
 
             moves_played = 42 - sum(row.count(0) for row in board)
+
             if moves_played < 4 and random.random() < 0.5:
                 column = random.choice(legal_actions)
                 action = torch.tensor([[column]], device=device, dtype=torch.long)
-
-            action = select_action(state, legal_actions)
-            column = action.item()
+            else:
+                action = select_action(state, legal_actions)
+                column = action.item()
 
             row = make_move(board, column, player)
 
-
             if row is None:
                 break
+
             winner = check_win(board, (row, column))
 
             if winner == player:
-
                 reward = torch.tensor([1.0], device=device)
                 memory.push(state, action, None, reward)
 
                 if prev is not None:
-                    memory.push(prev[0], prev[1], None,
-                                
-                                torch.tensor([-1.0], device=device))
-                optimize_model() 
-                optimize_model()
-                optimize_model()
-                optimize_model()
+                    memory.push(
+                        prev[0],
+                        prev[1],
+                        None,
+                        torch.tensor([-1.0], device=device)
+                    )
+
+                optimize_steps()
                 game_over = True
 
             elif not get_legal_actions(board):
-
                 reward = torch.tensor([0.0], device=device)
                 memory.push(state, action, None, reward)
 
                 if prev is not None:
-                    memory.push(prev[0], prev[1], None,
-                                torch.tensor([0.0], device=device))
-                optimize_model()
-                optimize_model()
-                optimize_model()
-                optimize_model()
+                    memory.push(
+                        prev[0],
+                        prev[1],
+                        None,
+                        torch.tensor([0.0], device=device)
+                    )
+
+                optimize_steps()
                 game_over = True
 
             else:
                 if prev is not None:
                     memory.push(
-                        prev[0],                                          
+                        prev[0],
                         prev[1],
                         state,
                         torch.tensor([0.0], device=device)
                     )
-                    optimize_model()
-                    optimize_model()
-                    optimize_model()
-                    optimize_model()
-                prev = (state, action) 
+                    optimize_steps()
+
+                prev = (state, action)
 
             player = 2 if player == 1 else 1
 
@@ -374,7 +410,6 @@ print("Do you want to fight another player, or an AI?")
 enemy = input()
 
 if enemy == "Player":
-
     print("Are you player 1 or 2?")
     answer = input()
 
@@ -387,40 +422,40 @@ if enemy == "Player":
         game = False
 
 elif enemy == "AI":
-    print("Do you wish to train a new AI, or use a pre-trained one? (enter: train/use). Warning: unless you have changed the path, this will overwrite saved model.")
+    print("Do you wish to train a new AI, or use a pre-trained one? (enter: train/use).\n\nWARNING: unless you have changed the path, this will overwrite saved model.")
     choice = input()
+
     if choice == "train":
-        
-        start = time.time()
+        start = time.perf_counter()
 
-        train_ai(10_000) 
+        train_ai(50000)
 
-        torch.save(policy_net.state_dict(), "connect4_model.pth")  # save trained model
+        torch.save(policy_net.state_dict(), "connect4_model.pth")
 
-        print("Model saved. In connect4/path") 
+        print("Model saved. In connect4/path")
 
-        end = time.time()
+        end = time.perf_counter() - start
 
         print(str(end - start) + " seconds")
-        board = [
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0] ]
 
+        board = [
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0]
+        ]
 
     elif choice == "use":
         if os.path.exists("connect4_model.pth"):
-
-            policy_net.load_state_dict(torch.load("10k_good.pth", map_location = torch.device(device))) 
-
+            policy_net.load_state_dict(
+                torch.load("50k.pth", map_location=device, weights_only=True)
+            )
         else:
-
             print("Please enter 'train' or 'use'")
-
             game = False
+
     ai = 2
     player = 1
 
@@ -430,18 +465,15 @@ else:
 
 
 while game:
-
     print(f"Select a column. Player {player}:")
     show_board()
 
     if enemy == "AI" and player == ai:
-
         state = get_state(board, player)
-
         legal_actions = get_legal_actions(board)
 
         with torch.no_grad():
-            q_values = policy_net(state)[0]
+            q_values = policy_net(state.to(device))[0]
 
             for column in range(7):
                 if column not in legal_actions:
@@ -452,10 +484,8 @@ while game:
         print(f"AI chooses column {column_num + 1}")
 
     else:
-
         try:
             column_num = int(input()) - 1
-
         except ValueError:
             print("Please enter a valid column number, 1-7")
             continue
@@ -494,3 +524,4 @@ while game:
         player = 2
     else:
         player = 1
+```
