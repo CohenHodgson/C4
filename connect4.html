@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Connect 4 AI</title>
 <style>
-/* ---------- Theme ---------- */
+  
 :root {
   --bg: #E8EDF1;
   --ink: #13202A;
@@ -13,19 +13,19 @@
   --line: #BCC8D2;
   --board: #2F5D8A;
   --hole: #E8EDF1;
-  --p1: #D1301F;   /* Red */
-  --p2: #E0A21A;   /* Yellow */
+  --p1: #D1301F;
+  --p2: #E0A21A;
   --link: #0F4C81;
   --body: "Instrument Sans", "Segoe UI", Helvetica, Arial, sans-serif;
   color-scheme: light;
 
-  /* keep content clear of phone notches / system bars */
+  /* keep content clear of phone notches/system bars */
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* Dark values, listed twice on purpose: once for the OS setting,
-   once for a manual data-theme="dark" override. Keep them in sync. */
+/* dark values, once for the OS setting,
+   once for a manual data-theme="dark" override. keep them in sync. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #101A22;
@@ -53,7 +53,7 @@
   color-scheme: dark;
 }
 
-/* ---------- Base ---------- */
+/* the base */
 *, *::before, *::after { box-sizing: border-box; }
 html { scroll-padding-top: env(safe-area-inset-top, 0px); }
 [hidden] { display: none !important; }  /* needed because label uses display:flex */
@@ -68,7 +68,7 @@ main { max-width: 34rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
 h1 { margin: 0; font-size: 2rem; letter-spacing: -.02em; }
 .sub { margin: .25rem 0 1.25rem; color: var(--muted); }
 
-/* ---------- Controls ---------- */
+/* the CONTROLS */
 .controls { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin-bottom: 1rem; }
 label { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; color: var(--muted); }
 
@@ -97,7 +97,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
 .status { margin: 0 0 .75rem; font-size: 1.15rem; font-weight: 600; min-height: 1.75rem; }
 .dot { display: inline-block; width: .8em; height: .8em; border-radius: 50%; margin-right: .4em; }
 
-/* ---------- Board ---------- */
+/* BOARD */
 .board {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -125,7 +125,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
 .cell.last { box-shadow: inset 0 0 0 4px rgba(255, 255, 255, .6); }
 .cell.win { outline: 3px solid var(--ink); outline-offset: 2px; }
 
-/* ---------- AI Q-values under the board ---------- */
+/* internal Q-Values under each column */
 .qrow {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -142,7 +142,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
 <body>
 <main>
   <h1>Connect 4 AI</h1>
-  <p class="sub">Play a friend, or play the neural network from my self-play training.</p>
+  <p class="sub">Play independently or play a loaded neural net.</p>
 
   <div class="controls">
     <label>Mode
@@ -179,9 +179,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
 
 <script>
 (() => {
-  /* =====================================================================
-     Constants
-     ===================================================================== */
+  /* CONSTANTS */
   const ROWS = 6;
   const COLS = 7;
   const AI_DELAY_MS = 400;
@@ -194,9 +192,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
     { name: 'linear_relu_stack.4', outputs: 7,   inputs: 48 },
   ];
 
-  /* =====================================================================
-     State
-     ===================================================================== */
+  /* state vars*/
   let board;          // board[row][col]: 0 = empty, 1 = red, 2 = yellow (row 0 is the top)
   let turn;           // player to move (1 or 2)
   let gameOver;
@@ -213,9 +209,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
   const columnButtons = [];
   const cells = [];   // cells[col][row] -> DOM element
 
-  /* =====================================================================
-     Small helpers
-     ===================================================================== CMPUT 274 for the win lol*/
+  /* helpers. CMPUT 274 for the win lol*/
   const emptyBoard = () => Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
   const canPlay = () => !(mode === 'ai' && !model);       // AI mode needs a loaded model
   const isAiTurn = () => mode === 'ai' && turn !== humanPlayer;
@@ -223,9 +217,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
   const dotHtml = player => `<span class="dot" style="background:var(--p${player})"></span>`;
   const inBounds = (row, col) => row >= 0 && row < ROWS && col >= 0 && col < COLS;
 
-  /* =====================================================================
-     Game logic
-     ===================================================================== */
+  /* the game logic */
   function newGame() {
     clearTimeout(aiTimer);   // cancel any AI move still pending from the previous game
     board = emptyBoard();
@@ -242,7 +234,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
     scheduleAiMove();
   }
 
-  // Drops a piece in a column; returns the row it landed in, or -1 if the column is full.
+  // drops a piece in a column; returns the row it landed in, or -1 if the column is full.
   function dropPiece(col, player) {
     for (let row = ROWS - 1; row >= 0; row--) {
       if (board[row][col] === 0) {
@@ -253,7 +245,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
     return -1;
   }
 
-  // Returns every connected cell in a line of 4+ through (row, col), or null.
+  // returns every connected cell in a line of 4+ through (row, col), or null.
   function findWinningLine(row, col) {
     const player = board[row][col];
     for (const [dRow, dCol] of DIRECTIONS) {
@@ -282,9 +274,9 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
       gameOver = true;
       winningCells = line;
     } else if (board[0].every(cell => cell !== 0)) {
-      gameOver = true;                // board full: draw
+      gameOver = true; // board full: draw
     } else {
-      turn = 3 - turn;                // switch between 1 and 2
+      turn = 3 - turn; // switch between 1 and 2
     }
     render();
     scheduleAiMove();
@@ -295,11 +287,9 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
     play(col);
   }
 
-  /* =====================================================================
-     The AI
-     ===================================================================== */
+  /* The AI itself */
 
-  // Board as the network sees it: 1 = my piece, -1 = opponent's, 0 = empty (row by row).
+  // board as the network sees it: 1 = my piece, -1 = opponent's, 0 = empty (row by row).
   function boardAsInput(player) {
     return board.flat().map(v => (v === 0 ? 0 : v === player ? 1 : -1));
   }
@@ -324,7 +314,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
   function aiMove() {
     qValues = runNetwork(boardAsInput(3 - humanPlayer));
 
-    let best = -1;                    // best non-full column; ties go to the leftmost
+    let best = -1; // best non-full column; ties go to the leftmost
     for (let col = 0; col < COLS; col++) {
       if (board[0][col] !== 0) continue;
       if (best < 0 || qValues[col] > qValues[best]) best = col;
@@ -342,9 +332,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
     }, AI_DELAY_MS);
   }
 
-  /* =====================================================================
-     Rendering
-     ===================================================================== */
+  /* render */
   function buildBoard() {
     for (let col = 0; col < COLS; col++) {
       const button = document.createElement('button');
@@ -428,7 +416,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
      library for this in the browser, so we read both formats by hand.
      ===================================================================== */
 
-  // Step 1: unzip. Returns { filename: Uint8Array } (only uncompressed zips are supported).
+  // step 1: unzip. returns { filename: Uint8Array } (only uncompressed zips are supported).
   function readZipEntries(bytes) {
     if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) throw new Error('not a zip-format .pth');
 
@@ -464,7 +452,7 @@ select:focus-visible, .btn:focus-visible, .col:focus-visible {
     return files;
   }
 
-  // Step 2: run a tiny pickle interpreter, supporting only the opcodes PyTorch uses.
+  // step 2: run a tiny pickle interpreter, supporting only the opcodes PyTorch uses.
   // Returns the saved state_dict as a Map of name -> tensor description.
   const OP = {
     PROTO: 0x80, FRAME: 0x95, STOP: 0x2e, MARK: 0x28, BUILD: 0x62,
